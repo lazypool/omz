@@ -1,44 +1,30 @@
 #!/usr/bin/env bash
 
 declare -r -x DEFAULT_PREVIEW_POSITION="right"
-declare -r -x UEBERZUG_FIFO="$(mktemp --dry-run --suffix "fzf-$$-ueberzug")"
 declare -r -x PREVIEW_ID="preview"
 
-function start_ueberzug {
-    mkfifo "${UEBERZUG_FIFO}"
-    <"${UEBERZUG_FIFO}" \
-        ueberzug layer --parser bash --silent &
-    3>"${UEBERZUG_FIFO}" \
-        exec
-}
+TERM_COLUMNS=$(tput cols 2>/dev/null || echo 80)
+TERM_LINES=$(tput lines 2>/dev/null || echo 24)
 
-function finalise {
-    3>&- \
-        exec
-    &>/dev/null \
-        rm "${UEBERZUG_FIFO}"
-    &>/dev/null \
-        kill $(jobs -p)
-    killall ueberzug
-}
+PREVIEW_LEFT=${FZF_PREVIEW_LEFT:-$((TERM_COLUMNS / 2))}
+PREVIEW_TOP=${FZF_PREVIEW_TOP:-$((TERM_LINES > 12 ? TERM_LINES - 12 : 0))}
+PREVIEW_COLUMNS=${FZF_PREVIEW_COLUMNS:-$((TERM_COLUMNS - PREVIEW_LEFT))}
+PREVIEW_LINES=${FZF_PREVIEW_LINES:-12}
 
 function draw_preview {
-    source $OMZ/cache/cursor
-    X=$(($COLUMNS / 2 + 2))
-    Y=$((row + 2))
-    if [ $Y -gt $((LINES - 11)) ]; then
-        Y=$((LINES - 11))
-    fi
+    local file=$1
+    [ -n "$file" ] || return 1
 
-    >"${UEBERZUG_FIFO}" declare -A -p cmd=( \
-        [action]=add [identifier]="${PREVIEW_ID}" \
-        [x]="${X}" [y]="${Y}" \
-        [width]="$(($COLUMNS / 2 - 2))" [height]="10" \
-        [scaler]=forced_cover [scaling_position_x]=0.5 [scaling_position_y]=0.5 \
-        [path]="${@}")
+    ueberzugpp cmd -s "$UEBERZUGPP_SOCKET" -i "$PREVIEW_ID" -a add \
+        -x "$PREVIEW_LEFT" -y "$PREVIEW_TOP" --max-width "$PREVIEW_COLUMNS" --max-height "$PREVIEW_LINES" \
+        -f "$file"
 }
 
-trap finalise EXIT
-start_ueberzug
-draw_preview $*
-sleep 999999
+function remove_preview {
+    ueberzugpp cmd -s "$UEBERZUGPP_SOCKET" -i "$PREVIEW_ID" -a remove
+}
+
+case "$1" in
+	draw) shift; draw_preview "$@" ;;
+	remove) remove_preview ;;
+esac
